@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HermitUI - Local AI Chat</title>
+    <meta name="description" content="A modern, local AI chat interface with streaming, syntax highlighting, and thinking model support.">
+    <link rel="icon" href="favicon.svg">
+    <!-- SRI integrity hashes pin the exact file contents (sha384 of each pinned
+         version). marked ships no pre-minified UMD build since v13, and jsDelivr's
+         on-the-fly .min.js is dynamically generated (unsafe for SRI), so the raw
+         lib/marked.umd.js is used. The Inter <link> below has no SRI: Google Fonts
+         serves per-browser CSS. -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@18.0.6/lib/marked.umd.js" integrity="sha384-uGn1eBC40GtuBgao0epc/cz9O4Lo8/flg/10SW+69UjLI5nP31iT4UPc65Xz10Le" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js" integrity="sha384-piCcpDdJ7qVeK4Tv8Z6Hpcr3ZBIgP16TxQTPVfsLFdZ5uDgwc3Y8Ho7oUnqf12qu" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" integrity="sha384-eFTL69TLRZTkNfYZOLM+G04821K1qZao/4QLJbet1pP4tcF+fdXq/9CdqAbWRl/L" crossorigin="anonymous">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" integrity="sha384-RH2xi4eIQ/gjtbs9fUXM68sLSi99C7ZWBRX1vDrVv6GQXRibxXLbwO2NGZB74MbU" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.js" integrity="sha384-CwjPRVHTvLiMBFjEoij+QZViMV5rhTOIp7CJzl24JEqpRDA1sJFHVXXLURktbYYp" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.min.js" integrity="sha384-T/0lMUdJpd2S1ZHtRiofG3htU3xPCrFVeAQ1UUE2TJwlEJSV5NUwn30kP28n238E" crossorigin="anonymous"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- @wllama:start -->
+    <!-- Quake-style debug console: drops down from the top of the screen (toggle via the 🐛 header button or the tab) -->
+    <div id="debugConsole">
+        <div id="debugConsoleHeader">
+            <span class="dc-title">🐛 Debug Console</span>
+            <label class="dc-verbose" for="wllamaVerbosity">Verbosity
+                <select id="wllamaVerbosity" title="How much wllama detail to show">
+                    <option value="0">Off</option>
+                    <option value="1">Errors</option>
+                    <option value="2">Warnings</option>
+                    <option value="3" selected>Info</option>
+                    <option value="4">Debug</option>
+                </select>
+            </label>
+            <span id="wllamaLiveStat" class="dc-live"></span>
+            <span class="dc-spacer"></span>
+            <button type="button" id="wllamaDebugClear" class="dc-btn">Clear</button>
+            <button type="button" id="debugConsoleClose" class="dc-btn" title="Close">✕</button>
+        </div>
+        <pre id="wllamaDebugLog"></pre>
+        <button type="button" id="debugConsoleTab" title="Toggle debug console">▾ debug</button>
+    </div>
+    <!-- @wllama:end -->
+    <header>
+        <div class="header-left">
+            <h2>HermitUI <span class="version-badge">v0.9.1</span></h2>
+            <div class="model-badge" title="Current Model">
+                🤖 <span id="overlayModel">local-model</span> @ <span id="overlayUrl">http://localhost:1234</span>
+            </div>
+        </div>
+        <div class="header-center">
+            <button class="header-btn" id="clearBtn" title="New Chat (Ctrl+Shift+O)" aria-label="New Chat">➕ New Chat</button>
+            <button class="header-btn" id="summarizeBtn" title="Summarize Chat (Ctrl+Shift+S)" aria-label="Summarize Chat">📋 Summarize</button>
+        </div>
+        <div class="header-actions">
+            <!-- @wllama:start -->
+            <button class="header-btn icon-only" id="debugToggleBtn" title="Debug Console" aria-label="Toggle Debug Console">🐛</button>
+            <!-- @wllama:end -->
+            <button class="header-btn icon-only" id="themeToggleBtn" title="Toggle Theme" aria-label="Toggle Theme">🌙</button>
+            <button class="header-btn icon-only" id="workspaceBtn" title="Set Agent Workspace" aria-label="Set Agent Workspace">📁</button>
+            <button class="header-btn icon-only" id="exportBtn" title="Export Chat (Ctrl+E)" aria-label="Export Chat">📤</button>
+            <button class="header-btn icon-only" id="importBtn" title="Import Chat (Ctrl+I)" aria-label="Import Chat">📂</button>
+            <input type="file" id="importFileInput" accept=".md,.markdown,.txt,text/markdown" style="display: none;">
+            <button class="header-btn icon-only" id="settingsBtn" title="Settings" aria-label="Settings">⚙️</button>
+            <button class="header-btn icon-only" id="aboutBtn" title="About" aria-label="About">ℹ️</button>
+        </div>
+    </header>
+
+    <!-- About Modal -->
+    <div class="modal-overlay" id="aboutModal" role="dialog" aria-modal="true" aria-labelledby="aboutModalTitle">
+        <div class="modal">
+            <h3 id="aboutModalTitle">ℹ️ About HermitUI</h3>
+            <p style="margin-bottom: 16px; line-height: 1.6; color: var(--text-main);">
+                HermitUI is a lightweight, modern, and highly responsive single-page web interface for interacting with local AI models. Built entirely in a single file, it requires no build steps, backend, or installation.
+            </p>
+            <p style="margin-bottom: 24px; line-height: 1.6; color: var(--text-main);">
+                By design, it prioritizes your privacy—no chat history is saved across sessions.
+            </p>
+            <div style="display: flex; gap: 12px; margin-bottom: 24px;">
+                <a href="https://github.com/moooff/HermitUI" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 8px; background: #24292e; color: white; padding: 10px 20px; border-radius: 8px; font-weight: 500; text-decoration: none; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: transform 0.2s;">
+                    <svg height="20" aria-hidden="true" viewBox="0 0 16 16" version="1.1" width="20" data-view-component="true" style="fill: white;">
+                        <path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"></path>
+                    </svg>
+                    GitHub Repository
+                </a>
+            </div>
+            <div class="modal-actions">
+                <button class="primary-btn" id="aboutCloseBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Confirmation Modal -->
+    <div class="modal-overlay" id="importConfirmModal" role="dialog" aria-modal="true" aria-labelledby="importConfirmTitle">
+        <div class="modal">
+            <h3 id="importConfirmTitle">📂 Replace this chat?</h3>
+            <p style="margin-bottom: 24px; line-height: 1.6; color: var(--text-main);">
+                Importing loads the conversation from the file and discards the one on screen.
+                Nothing is saved anywhere, so the current chat cannot be recovered — export it first if you want to keep it.
+            </p>
+            <div class="modal-actions">
+                <button class="cancel-btn" id="importCancelBtn">Cancel</button>
+                <button class="primary-btn" id="importConfirmBtn">Import</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Chat Confirmation Modal -->
+    <div class="modal-overlay" id="newChatConfirmModal" role="dialog" aria-modal="true" aria-labelledby="newChatConfirmTitle">
+        <div class="modal">
+            <h3 id="newChatConfirmTitle">➕ Start a new chat?</h3>
+            <p style="margin-bottom: 24px; line-height: 1.6; color: var(--text-main);">
+                This clears the conversation on screen along with anything in the composer.
+                Nothing is saved anywhere, so it cannot be recovered — export it first if you want to keep it.
+            </p>
+            <div class="modal-actions">
+                <button class="cancel-btn" id="newChatCancelBtn">Cancel</button>
+                <button class="primary-btn" id="newChatConfirmBtn">New Chat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+        <div class="modal">
+            <h3 id="settingsModalTitle">⚙️ Settings</h3>
+            <!-- @wllama:start -->
+            <label for="settingBackendMode">Backend Mode</label>
+            <select id="settingBackendMode" style="width: 100%; padding: 12px 16px; border-radius: 12px; border: 1px solid #d1d5db; font-size: 0.95rem; font-family: 'Inter', system-ui, sans-serif; color: var(--text-main); margin-bottom: 20px; outline: none; background: #fff; cursor: pointer;">
+                <option value="api">Remote / Local API (OpenAI Compatible)</option>
+                <option value="wllama">True Offline (Wllama GGUF)</option>
+            </select>
+
+            <div id="wllamaSettingsGroup" style="display: none; padding: 10px; background: rgba(0,0,0,0.02); border-radius: 8px; margin-bottom: 20px;">
+                <div id="wllamaCapabilityHint" style="display: none; font-size: 0.75rem; color: #d97706; margin-bottom: 8px;"></div>
+                <label for="settingWllamaFile">Load GGUF Model File</label>
+                <input type="file" id="settingWllamaFile" accept=".gguf" style="margin-bottom: 8px; width: 100%;">
+
+                <label for="settingWllamaUrl">…or Load from URL (Hugging Face)</label>
+                <div style="display: flex; gap: 6px; align-items: stretch;">
+                    <input type="text" id="settingWllamaUrl" placeholder="https://huggingface.co/…/resolve/main/model.gguf  or  hf:user/repo/file.gguf" style="flex: 1; margin-bottom: 0; min-width: 0;">
+                    <button type="button" class="action-btn" id="wllamaUrlLoadBtn" style="flex-shrink: 0; color: var(--primary); font-weight: 600; font-size: 0.85rem; padding: 0 14px; border: 1px solid var(--primary); border-radius: 12px;">⬇️ Load</button>
+                </div>
+                <div style="font-size: 0.75rem; color: #999; margin: 4px 0 8px;">Accepts direct <code>.gguf</code> links, Hugging Face <code>/blob/</code> page URLs, or <code>hf:user/repo/file.gguf</code>. The model streams straight into memory — nothing is ever stored, so it is fetched again next session.<span id="wllamaSaveCopyHint" style="display: none;"> <a id="wllamaSaveCopyLink" href="#" target="_blank" rel="noopener noreferrer" download>💾 Save a copy to disk</a> to avoid that: download it once, then load it with the file picker above.</span></div>
+
+                <div id="wllamaStatusContainer" style="margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; gap: 8px;">
+                        <div id="wllamaStatus" style="font-size: 0.85rem; color: #666; word-break: break-all;">Status: Unloaded</div>
+                        <button type="button" class="action-btn" id="wllamaUnloadBtn" style="display: none; flex-shrink: 0; color: #ef4444; border: 1px solid #ef4444; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 600;" title="Unload the current model to free up memory">⏏️ Unload</button>
+                    </div>
+                    <div id="wllamaProgressBarContainer" style="display: none; height: 6px; background: rgba(0,0,0,0.1); border-radius: 4px; overflow: hidden; width: 100%;">
+                        <div id="wllamaProgressBar" class="pb-indeterminate"></div>
+                    </div>
+                </div>
+
+                <label for="settingWllamaTemplate">Chat Format</label>
+                <select id="settingWllamaTemplate" style="margin-bottom: 8px; width: 100%;">
+                    <option value="auto">Auto (detect from model)</option>
+                    <option value="chatml">ChatML (Qwen, Yi, OpenHermes)</option>
+                    <option value="llama3">Llama 3</option>
+                    <option value="mistral">Mistral / Mixtral</option>
+                    <option value="gemma">Gemma</option>
+                    <option value="phi3">Phi-3</option>
+                    <option value="zephyr">Zephyr</option>
+                    <option value="alpaca">Alpaca (instruct)</option>
+                    <option value="raw">Raw (no template)</option>
+                </select>
+                <div id="wllamaTemplateHint" style="font-size: 0.75rem; color: #999; margin-bottom: 8px;">Auto uses the model's embedded template when present, else infers from its architecture.</div>
+
+                <label for="settingWllamaCtx">Context Window (tokens)</label>
+                <input type="number" id="settingWllamaCtx" value="32768" min="0" step="512" style="margin-bottom: 4px; width: 100%;">
+                <div style="font-size: 0.75rem; color: #999; margin-bottom: 8px;">Larger = more history but more memory/slower load (the KV cache grows with it — if the model fails to load, lower this). 0 = use the model's built-in default. Applied when the model is loaded.</div>
+
+                <label for="settingWllamaMaxTokens">Max Output Tokens (per reply)</label>
+                <input type="number" id="settingWllamaMaxTokens" value="4096" min="1" step="128" style="margin-bottom: 4px; width: 100%;">
+                <div style="font-size: 0.75rem; color: #999; margin-bottom: 8px;">Upper bound on tokens generated per reply. Applied immediately (no reload needed). Must fit within the context window.</div>
+
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <input type="checkbox" id="wllamaWebGpuToggle" checked>
+                    <label for="wllamaWebGpuToggle" style="margin: 0; font-size: 0.85rem;">Enable WebGPU (Hardware Acceleration)</label>
+                </div>
+                <div style="font-size: 0.75rem; color: #999;">Note: On some systems (especially integrated graphics) WebGPU may be slower than CPU. Uncheck to force CPU-only mode.</div>
+
+                <div style="font-size: 0.75rem; color: #999; margin-top: 10px;">🐛 Debug output (engine load, model metadata, chosen template, the prompt sent, tokens/sec) streams to the drop-down console at the top of the screen — click the <b>🐛</b> button in the header.</div>
+            </div>
+
+            <div id="apiSettingsGroup">
+            <!-- @wllama:end -->
+            <label for="settingUrl">API Base URL</label>
+            <input type="text" id="settingUrl" value="http://localhost:1234/v1">
+            <div id="cloudWarning" style="display: none; background: rgba(254, 243, 199, 0.8); color: #92400e; padding: 10px 12px; margin-bottom: 12px; border-radius: 8px; font-size: 0.85rem; border: 1px solid #fcd34d; align-items: flex-start; gap: 8px;">
+                <span style="font-size: 1.1rem; flex-shrink: 0;">⚠️</span>
+                <div>
+                    <b>Privacy Warning:</b> This endpoint is not on your machine or local network (<b id="cloudWarningTarget"></b>). Your chat data will leave your local machine.
+                </div>
+            </div>
+            <div id="mixedContentWarning" style="display: none; background: rgba(254, 226, 226, 0.85); color: #991b1b; padding: 10px 12px; margin-bottom: 12px; border-radius: 8px; font-size: 0.85rem; border: 1px solid #fca5a5; align-items: flex-start; gap: 8px;">
+                <span style="font-size: 1.1rem; flex-shrink: 0;">🚫</span>
+                <div>
+                    <b>Blocked by your browser:</b> this page is served over HTTPS, so it cannot call a plain <code>http://</code> address other than <code>localhost</code>. Use <code>https://</code>, run HermitUI from a local file, or point it at <code>localhost</code>.
+                </div>
+            </div>
+            <label for="settingApiKey">API Key</label>
+            <!-- autocomplete=off: without it browsers offer to save this as a website password. -->
+            <input type="password" id="settingApiKey" value="dummy" autocomplete="off">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <label for="settingModelInput" style="margin-bottom: 0;">Model Name</label>
+                    <span id="visionBadge" class="vision-badge" title="This model appears to support image input" style="display: none;">👁️ vision</span>
+                </span>
+                <button type="button" class="action-btn" id="testConnectionBtn" style="color: var(--primary); font-weight: 600; font-size: 0.75rem; padding: 2px 6px;">🔌 Test Connection & Fetch Models</button>
+            </div>
+            <select id="settingModelSelect" style="display: none; width: 100%; padding: 12px 16px; border-radius: 12px; border: 1px solid #d1d5db; font-size: 0.95rem; font-family: 'Inter', system-ui, sans-serif; color: var(--text-main); margin-bottom: 20px; outline: none; background: #fff; cursor: pointer;">
+            </select>
+            <input type="text" id="settingModelInput" value="local-model">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 20px;">
+                <span id="reasoningProbeStatus" style="font-size: 0.75rem; color: #6b7280;">Reasoning support: not checked</span>
+                <button type="button" class="action-btn" id="reasoningProbeBtn" style="color: var(--primary); font-weight: 600; font-size: 0.75rem; padding: 2px 6px; flex-shrink: 0;">🧠 Check Reasoning Support</button>
+            </div>
+            <!-- @wllama:start -->
+            </div>
+            <!-- @wllama:end -->
+            <label for="settingTemperature">Temperature</label>
+            <input type="number" id="settingTemperature" value="0.7" step="0.1" min="0" max="2">
+            <details class="advanced-params">
+                <summary>Advanced parameters</summary>
+                <label for="settingMaxTokens">Max Tokens</label>
+                <input type="number" id="settingMaxTokens" placeholder="unlimited" step="1" min="1">
+                <label for="settingTopP">Top P</label>
+                <input type="number" id="settingTopP" value="1" step="0.05" min="0" max="1">
+                <label for="settingPresencePenalty">Presence Penalty</label>
+                <input type="number" id="settingPresencePenalty" value="0" step="0.1" min="-2" max="2">
+                <label for="settingFrequencyPenalty">Frequency Penalty</label>
+                <input type="number" id="settingFrequencyPenalty" value="0" step="0.1" min="-2" max="2">
+                <label for="settingSeed">Seed</label>
+                <input type="number" id="settingSeed" placeholder="random" step="1">
+            </details>
+            <label for="settingSystem">System Prompt</label>
+            <!-- Filled from the active persona whenever the modal opens; a hardcoded prompt here would only drift. -->
+            <textarea id="settingSystem"></textarea>
+            <div class="modal-actions">
+                <button class="cancel-btn" id="settingsCancel">Cancel</button>
+                <button class="primary-btn" id="settingsSave">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <main>
+        <div id="chat-container">
+            <div id="mainScreenCloudWarning" style="display: none; background: rgba(254, 243, 199, 0.85); color: #92400e; padding: 10px 16px; font-size: 0.85rem; border-bottom: 1px solid #fcd34d; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0; box-shadow: 0 2px 5px rgba(0,0,0,0.05); z-index: 10;">
+                <span style="font-size: 1.1rem;">⚠️</span>
+                <span><b>Privacy Warning:</b> You are using a cloud provider (<span id="mainCloudProviderName"></span>). Your chat data leaves your local machine.</span>
+            </div>
+            <!-- @wllama:start -->
+            <div id="wllamaHashBanner" style="display: none; background: rgba(219, 234, 254, 0.85); color: #1e40af; padding: 10px 16px; font-size: 0.85rem; border-bottom: 1px solid #93c5fd; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; flex-shrink: 0; box-shadow: 0 2px 5px rgba(0,0,0,0.05); z-index: 10;">
+                <span style="font-size: 1.1rem;">🔗</span>
+                <span>This link wants to load <b id="wllamaHashModelName"></b> from <span id="wllamaHashHost"></span> for in-browser inference.</span>
+                <button type="button" id="wllamaHashLoadBtn" style="background: var(--primary); color: white; border: none; padding: 6px 14px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; font-weight: 600; box-shadow: 0 2px 5px rgba(59,130,246,0.3);" title="Stream into memory for this session only">⬇️ Load to memory</button>
+                <a id="wllamaHashDownloadBtn" href="#" target="_blank" rel="noopener noreferrer" download style="background: #10b981; color: white; border: none; padding: 6px 14px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; font-weight: 600; text-decoration: none; box-shadow: 0 2px 5px rgba(16,185,129,0.3);" title="Save the .gguf file to your disk">💾 Download to disk</a>
+                <button type="button" id="wllamaHashLocalFileBtn" style="background: transparent; color: inherit; border: 1px solid #93c5fd; padding: 6px 14px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; font-weight: 600;" title="Load a previously downloaded .gguf file">📂 Select local file</button>
+                <button type="button" id="wllamaHashDismissBtn" style="background: transparent; color: inherit; border: 1px solid #93c5fd; padding: 6px 14px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; font-weight: 600;">Dismiss</button>
+            </div>
+            <!-- @wllama:end -->
+            <!-- role="log": screen readers announce appended messages politely;
+                 aria-busy is toggled during streaming so partial re-renders aren't read aloud. -->
+            <div id="chatbox" role="log" aria-label="Conversation"></div>
+           
+            <div class="input-container">
+                <button id="jumpBottomBtn" class="jump-bottom-btn">⬇️ Jump to Bottom</button>
+                <form id="chatForm">
+                    <div id="context-pane" style="display: none;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.85rem; font-weight: 600; color: #6b7280; display: flex; align-items: center; gap: 6px;">📎 Attach Data or Files</span>
+                            <button type="button" id="add-file-btn" style="background: var(--primary); color: white; border: none; padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; font-weight: 600; box-shadow: 0 2px 5px rgba(59,130,246,0.3); transition: transform 0.2s;">+ Add Files</button>
+                            <!-- Kept in step with isTextFile() in script.js; the OS MIME table
+                                 is wrong for source files (".ts" is video/mp2t), so the
+                                 extension list does the work. -->
+                            <input type="file" id="file-upload" multiple accept="image/png,image/jpeg,image/gif,image/webp,text/*,.txt,.md,.markdown,.rst,.log,.csv,.tsv,.json,.jsonc,.json5,.xml,.yml,.yaml,.toml,.ini,.cfg,.conf,.env,.properties,.js,.mjs,.cjs,.jsx,.ts,.tsx,.vue,.svelte,.html,.htm,.css,.scss,.sass,.less,.py,.rb,.php,.pl,.lua,.r,.c,.h,.cc,.cpp,.hpp,.cxx,.cs,.java,.kt,.kts,.swift,.mm,.go,.rs,.zig,.dart,.scala,.clj,.ex,.exs,.erl,.hs,.sh,.bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.graphql,.gql,.proto,.tf,.tfvars,.diff,.patch" style="display: none;">
+                        </div>
+                        <div id="file-chips" style="display: flex; flex-wrap: wrap; gap: 6px;"></div>
+                        <textarea id="context-input" placeholder="Paste text here or drop files into this area..." rows="3"></textarea>
+                    </div>
+                    <div class="input-shell">
+                        <textarea id="userInput" placeholder="Ask me anything... (Shift+Enter for new line)" rows="1" autocomplete="off" autofocus></textarea>
+                        <!-- Controls live inside the shell so the textarea keeps the full width,
+                             and wrap onto a second row on narrow screens instead of overflowing. -->
+                        <div class="composer-toolbar">
+                            <select class="persona-select" id="personaSelect" title="Switch Persona">
+                                <option value="technical">🔧 Technical</option>
+                                <option value="general">💬 General</option>
+                                <option value="writing">✍️ Writing</option>
+                                <option value="tutor">🎓 Tutor</option>
+                            </select>
+                            <!-- Reasoning-effort control. Hidden unless the active backend is known
+                                 (or believed) to honour it — see updateThinkingControl().
+                                 type="button" on every segment is load-bearing: they sit inside
+                                 #chatForm, so a default-type button would submit the message. -->
+                            <div class="think-seg" id="thinkingControl" role="radiogroup" aria-label="Reasoning effort" title="Reasoning effort" data-level="high" style="display: none;">
+                                <span class="think-seg-icon" aria-hidden="true">🧠</span>
+                                <button type="button" role="radio" data-level="off" aria-checked="false" tabindex="-1">Off</button>
+                                <button type="button" role="radio" data-level="low" aria-checked="false" tabindex="-1">Low</button>
+                                <button type="button" role="radio" data-level="medium" aria-checked="false" tabindex="-1">Med</button>
+                                <button type="button" role="radio" data-level="high" aria-checked="true" tabindex="0">High</button>
+                            </div>
+                            <div class="composer-actions">
+                                <button type="button" id="attach-context-btn" title="Attach context/data">📎</button>
+                                <button type="submit" class="primary-btn" id="sendBtn" title="Send message">↑</button>
+                                <button type="button" class="primary-btn" id="stopBtn" title="Stop generation">■</button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+                
+                <div class="stats-container">
+                    <div class="inline-stats" id="inlineStats">
+                        <div class="stat-item"><span class="stat-icon">📥</span> <span class="stat-value" id="stat-prompt">0</span> prompt tokens <span id="stat-prompt-est" style="color:#9ca3af;font-size:0.7rem;margin-left:2px;display:none">(est.)</span></div>
+                        <div class="stat-item"><span>·</span></div>
+                        <div class="stat-item"><span class="stat-icon">📤</span> <span class="stat-value" id="stat-completion">0</span> completion tokens <span id="stat-completion-est" style="color:#9ca3af;font-size:0.7rem;margin-left:2px;display:none">(est.)</span></div>
+                        <div class="stat-item"><span>·</span></div>
+                        <div class="stat-item"><span class="stat-icon">⚡</span> <span class="stat-value" id="stat-tps">0.0 t/s</span></div>
+                        <div class="stat-item"><span>·</span></div>
+                        <div class="stat-item"><span class="stat-icon">⏱️</span> <span class="stat-value" id="stat-time">0.0s</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- @wllama:start -->
+    <!-- @wllama:inline-engine -->
+    <!-- @wllama:end -->
+    <script src="script.js"></script>
+</body>
+</html>
